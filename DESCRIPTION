@@ -1,0 +1,8 @@
+Package: osrv
+Title: Anychronous Object Server
+Version: 0.1
+Author: Simon Urbanek <simon.urbanek@R-project.org>
+Maintainer: Simon Urbanek <simon.urbanek@R-project.org>
+Description: Simple threaded TCP server that allows the retrieval
+	     of objects from an R process without blocking.
+License: MIT + file LICENSE

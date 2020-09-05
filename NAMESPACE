@@ -1,0 +1,2 @@
+useDynLib(osrv, C_start, C_put, C_clean)
+export(start, put, clean)
