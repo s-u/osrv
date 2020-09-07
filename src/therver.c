@@ -108,8 +108,6 @@ static void *worker_thread(void *pool_arg) {
     return 0;
 }
 
-/* FIXME: entry mutex */
-
 /* me must be free()-able and we take ownership */
 static int add_task(qentry_t *me) {
     /* printf("add_task(%d) about to lock\n", me->c.s); */
@@ -265,6 +263,8 @@ int therver(const char *host, int port, int max_threads, process_fn_t process_fn
 #include <string.h>
 #include <sys/socket.h>
 
+#include <Rinternals.h>
+
 #define MAX_BUF  65536
 #define MAX_OBUF 2048
 #define MAX_SEND (1024*1024) /* 1Mb */
@@ -281,23 +281,46 @@ typedef struct entry_s {
     struct entry_s *next;
     obj_len_t len;
     void *obj;
+    SEXP sWhat;
     char key[1];
 } entry_t;
 
+static pthread_mutex_t obj_mutex;
+
 /* FIXME: use hash */
 static entry_t *obj_root;
+static entry_t *obj_gc_pool;
 
-static void obj_add(const char *key, void *data, obj_len_t len) {
+static void obj_add(const char *key, SEXP sWhat, void *data, obj_len_t len) {
     entry_t *e = (entry_t*) calloc(1, sizeof(entry_t) + strlen(key));
-    e->next = obj_root;
+    strcpy(e->key, key);
     e->len = len;
     e->obj = data;
-    strcpy(e->key, key);
+    e->sWhat = sWhat;
+    R_PreserveObject(sWhat);
+    pthread_mutex_lock(&obj_mutex);
+    e->next = obj_root;
     obj_root = e;
+    pthread_mutex_unlock(&obj_mutex);
+}
+
+static void obj_gc() {
+    pthread_mutex_lock(&obj_mutex);
+    /* FIXME: is this safe? We are hoping that
+       R_ReleaseObject() cannot longjmp... */
+    while (obj_gc_pool) {
+	entry_t *c = obj_gc_pool; 
+	R_ReleaseObject(obj_gc_pool->sWhat);
+	obj_gc_pool = obj_gc_pool->next;
+	free(c);
+    }
+    pthread_mutex_unlock(&obj_mutex);
 }
 
 static entry_t *obj_get(const char *key, int rm) {
     entry_t *e = obj_root, *prev = 0;
+    /* FIXME: this is conservative, can we reduce the region? */
+    pthread_mutex_lock(&obj_mutex);
     while (e) {
 	if (!strcmp(key, e->key)) {
 	    if (rm) {
@@ -305,11 +328,15 @@ static entry_t *obj_get(const char *key, int rm) {
 		    prev->next = e->next;
 		else
 		    obj_root = e->next;
+		e->next = obj_gc_pool;
+		obj_gc_pool = e;
 	    }
+	    pthread_mutex_unlock(&obj_mutex);
 	    return e;
 	}
 	e = e->next;
     }
+    pthread_mutex_unlock(&obj_mutex);
     return 0;
 }
 
@@ -389,6 +416,15 @@ static void do_process(conn_t *c) {
 
 #include <Rinternals.h>
 
+static int init_pt;
+
+static void do_init() {
+    if (!init_pt) {
+	pthread_mutex_init(&obj_mutex, 0);
+	init_pt = 1;
+    }
+}
+
 SEXP C_start(SEXP sHost, SEXP sPort, SEXP sThreads) {
     const char *host = (TYPEOF(sHost) == STRSXP && LENGTH(sHost) > 0) ?
 	CHAR(STRING_ELT(sHost, 0)) : 0;
@@ -399,7 +435,8 @@ SEXP C_start(SEXP sHost, SEXP sPort, SEXP sThreads) {
 	Rf_error("Invalid port %d", port);
     if (threads < 1 || threads > 1000)
 	Rf_error("Invalid number of threads %d", threads);
-    
+
+    do_init();
     if (therver(host, port, threads, do_process))
 	return ScalarLogical(0);
 
@@ -411,13 +448,13 @@ SEXP C_start(SEXP sHost, SEXP sPort, SEXP sThreads) {
 SEXP C_put(SEXP sKey, SEXP sWhat) {
     if (TYPEOF(sKey) != STRSXP || LENGTH(sKey) != 1 || TYPEOF(sWhat) != RAWSXP)
 	Rf_error("invalid key/value");
-    /* FIXME actual lifetime management or otherwise copy? */
-    R_PreserveObject(sWhat);
-    obj_add(CHAR(STRING_ELT(sKey, 0)), RAW(sWhat), XLENGTH(sWhat));
+    do_init();
+    obj_add(CHAR(STRING_ELT(sKey, 0)), sWhat, RAW(sWhat), XLENGTH(sWhat));
     return ScalarLogical(1);
 }
 
 SEXP C_clean() {
-    /* FIXME - release any pending objects */
+    do_init();
+    obj_gc();
     return ScalarLogical(1);
 }
