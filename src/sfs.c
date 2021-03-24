@@ -124,6 +124,34 @@ static void add(sfs_ts ts, sfs_len_t el, sfs_len_t len, const void *buf) {
 }
 
 static void store(SEXP sWhat) {
+    /* store attributes first if present */
+    switch (TYPEOF(sWhat)) {
+    case LGLSXP:
+    case INTSXP:
+    case REALSXP:
+    case CPLXSXP:
+    case STRSXP:
+    case VECSXP:
+    case RAWSXP:
+    case S4SXP:
+	if (ATTRIB(sWhat) != R_NilValue) {
+	    sfs_len_t l = 0;
+	    SEXP x = ATTRIB(sWhat);
+	    while (x != R_NilValue) {
+		x = CDR(x);
+		l++;
+	    }
+	    add(255, 0, l, 0);
+	    x = ATTRIB(sWhat);
+	    while (x != R_NilValue) {
+		store(TAG(x));
+		store(CAR(x));
+		x = CDR(x);
+	    }
+	}
+    }
+
+    /* then the object itself */
     switch (TYPEOF(sWhat)) {
     case INTSXP:
     case LGLSXP:
@@ -165,7 +193,7 @@ static void store(SEXP sWhat) {
 	break;
     case SYMSXP:
 	{
-	    const char *p = (char*) PRINTNAME(sWhat);
+	    const char *p = CHAR(PRINTNAME(sWhat));
 	    add(TYPEOF(sWhat), 0, strlen(p) + 1, p);
 	    break;
 	}
@@ -190,32 +218,6 @@ static void store(SEXP sWhat) {
     default:
 	add(TYPEOF(sWhat), 0, 0, 0);
     }
-
-    switch (TYPEOF(sWhat)) {
-    case LGLSXP:
-    case INTSXP:
-    case REALSXP:
-    case CPLXSXP:
-    case STRSXP:
-    case VECSXP:
-    case RAWSXP:
-    case S4SXP:
-	if (ATTRIB(sWhat) != R_NilValue) {
-	    sfs_len_t l = 0;
-	    SEXP x = ATTRIB(sWhat);
-	    while (x != R_NilValue) {
-		x = CDR(x);
-		l++;
-	    }
-	    add(255, 0, l, 0);
-	    x = ATTRIB(sWhat);
-	    while (x != R_NilValue) {
-		store(TAG(x));
-		store(CAR(x));
-		x = CDR(x);
-	    }
-	}
-    }
 }
 
 static char *fbuf;
@@ -229,11 +231,15 @@ static void fetch(void *buf, sfs_len_t len) {
     flen -= len;
 }
 
-static SEXP decode() {
+static SEXP decode();
+
+static char dec_buf[1024]; /* static scrarch buffer for decoding symbols */
+
+static SEXP decode_one(sfs_len_t hdr) {
     sfs_len_t len;
     sfs_ts ts;
     SEXP res = R_NilValue;
-    fetch(&len, sizeof(len));
+    len = hdr;
     ts = (unsigned char)(len & 255);
     len >>= 8;
     Rprintf("[%s:%04lx]\n", type_name[ts], len);
@@ -251,6 +257,20 @@ static SEXP decode() {
 	res = allocVector(ts, len);
 	fetch(COMPLEX(res), len * 16);
 	break;
+    case SYMSXP:
+	{
+	    if (len < sizeof(dec_buf)) {
+		fetch(dec_buf, len);
+		res = Rf_install(dec_buf);
+	    } else {
+		char *buf = (char*) malloc(len);
+		if (!buf)
+		    Rf_error("Cannot allocate memory for symbol (%lu bytes)", len);
+		res = Rf_install(buf);
+		free(buf);
+	    }
+	    break;
+	}
     case VECSXP:
 	{
 	    sfs_len_t i = 0;
@@ -262,34 +282,81 @@ static SEXP decode() {
 	    UNPROTECT(1);
 	    break;
 	}
-    case 255:
+    case STRSXP:
 	{
 	    sfs_len_t i = 0;
-	    SEXP at = R_NilValue, ar = R_NilValue;
-	    PROTECT(res);
-	    Rprintf("ATTR:%d\n", len);
+	    res = PROTECT(allocVector(ts, len));
+	    while (i < len) {
+		SET_STRING_ELT(res, i, decode());
+		i++;
+	    }
+	    UNPROTECT(1);
+	    break;
+	}
+    case CHARSXP:
+	{
+	    if (len < sizeof(dec_buf)) {
+		fetch(dec_buf, len);
+		res = mkChar(dec_buf);
+	    } else {
+		char *buf = (char*) malloc(len);
+		if (!buf)
+		    Rf_error("Cannot allocate memory for string (%lu bytes)", len);
+		res = mkChar(buf);
+		free(buf);
+	    }
+	    break;
+	}
+	
+    case 255:
+    case LISTSXP:
+    case LANGSXP:
+	{
+	    sfs_len_t i = 0;
+	    SEXP at = R_NilValue;
+	    res = R_NilValue;
 	    while (i < len) {
 		SEXP tag = PROTECT(decode());
 		SEXP val = PROTECT(decode());
-		SEXP x = PROTECT(CONS(val, R_NilValue));
+		SEXP x = PROTECT((ts == LANGSXP) ?
+				 LCONS(val, R_NilValue) :
+				 CONS(val, R_NilValue));
 		if (tag != R_NilValue)
 		    SET_TAG(x, tag);
 		if (at == R_NilValue) {
-		    at = ar = x;
+		    res = at = x;
 		} else {
-		    SETCDR(ar, x);
+		    SETCDR(at, x);
 		    UNPROTECT(3);
-		    ar = x;
+		    at = x;
 		}
 		i++;
 	    }
 	    if (i > 0)
 		UNPROTECT(3);
-	    PROTECT(at);
-	    SET_ATTRIB(res, at);
-	    UNPROTECT(2);
 	    break;
 	}
+    default:
+	Rf_error("Unimplemented de-serialisation for %s (%d)", type_name[ts], (int)ts);
+    }
+    return res;
+}
+
+static SEXP decode() {
+    sfs_len_t hdr;
+    SEXP res, attr = R_NilValue;
+    fetch(&hdr, sizeof(hdr));
+    if ((hdr & 255) == 255) {
+	attr = decode_one(hdr);
+	if (attr != R_NilValue)
+	    PROTECT(attr);
+	fetch(&hdr, sizeof(hdr));
+    }
+    res = decode_one(hdr);
+    if (attr != R_NilValue) {
+	PROTECT(res);
+	SET_ATTRIB(res, attr);
+	UNPROTECT(2);
     }
     return res;
 }
