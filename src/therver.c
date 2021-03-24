@@ -42,7 +42,7 @@ int therver(const char *host, int port, int max_threads, process_fn_t process_fn
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
-#include <sys/errno.h>
+#include <errno.h>
 #include <unistd.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
