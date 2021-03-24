@@ -6,3 +6,6 @@ put <- function(key, value)
 
 clean <- function()
     .Call(C_clean)
+
+ask <- function(cmd, host="127.0.0.1", port=9012L)
+    .Call(C_ask, host, port, cmd)

@@ -1,2 +1,2 @@
-useDynLib(osrv, C_start, C_put, C_clean)
-export(start, put, clean)
+useDynLib(osrv, C_start, C_put, C_clean, C_ask)
+export(start, put, clean, ask)

@@ -3,6 +3,7 @@
 \alias{start}
 \alias{put}
 \alias{clean}
+\alias{ask}
 \title{
   Manage Object Server
 }
@@ -14,11 +15,16 @@
 
   \code{clean} does the equivalent of a garbage collection on any
   objects that were released by the serving threads.
+
+  \code{ask} is a rudimentary object server client that sends a command,
+  awaits a response and closes the connection.
 }
 \usage{
 start(host = NULL, port = 9012L, threads = 4L)
 put(key, value)
 clean()
+
+ask(cmd, host = "127.0.0.1", port = 9012L)
 }
 \arguments{
   \item{host}{string or \code{NULL}, IP address or host name of the
@@ -27,6 +33,7 @@ clean()
   \item{threads}{integer, number of worker threads to start}
   \item{key}{string, key to use for retrieval}
   \item{value}{raw vector, payload to serve}
+  \item{cmd}{command to send}
 }
 \details{
   The current implementation allows only one server in the process at a
@@ -38,6 +45,10 @@ clean()
 }
 \value{
   \code{TRUE} on success and \code{FALSE} on failure.
+
+  \code{ask} returns either the status as a string for commands that do
+  not return payload (typically \code{"OK"} or \code{"NF"}) or the
+  payload as a raw vector.
 }
 %\references{
 %}
@@ -50,38 +61,13 @@ clean()
  ## put an object under the key "foo"
  put("foo", charToRaw("bar"))
 
- s <- socketConnection("127.0.0.1", port=9012, open="a+b")
-
- ## very rudimentary client using sockets in R
- cmd <- function(s, cmd) {
-   writeBin(charToRaw(cmd), s)
-   while (!length(a <- readBin(s, raw(), 32))) {}
-   i <- which(a == as.raw(10))
-   if (!length(i)) stop("Invalid answer")
-   res <- gsub("[\r\n]+","",rawToChar(a[1:i[1]]))
-   sr <- strsplit(res, " ", TRUE)[[1]]
-   ## object found
-   if (sr[1] == "OK" && length(sr) > 1) {
-     len <- as.numeric(sr[2])
-     p <- if (i[1] < length(a)) a[-(1:i[1])] else raw()
-     ## read the rest of the object
-     while (length(p) < len)
-       p <- c(p, readBin(s, raw(), len - length(p)))
-     p
-   } else if (sr[1] == "OK") {
-     TRUE
-   } else stop("Answer: ", sr[1])
- }
-
- ## retrieve "foo"
- v <- cmd(s, "GET foo\n")
- print(rawToChar(v))
+ (r <- ask("GET foo\n"))
+ rawToChar(r)
 
  ## delete "foo"
- cmd(s, "DEL foo\n")
+ ask("DEL foo\n")
 
  ## it should be removed now so NF (not found)
- print(tryCatch(cmd(s, "GET foo\n"),
-   error=function(e) e))
+ ask("GET foo\n")
 }
 \keyword{system}
