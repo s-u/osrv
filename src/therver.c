@@ -486,6 +486,8 @@ SEXP C_ask(SEXP sHost, SEXP sPort, SEXP sCmd) {
 	Rf_error("invalid port");
 
     ss = socket(AF_INET, SOCK_STREAM, 0);
+    if (ss == -1)
+	Rf_error("Cannot obtain a socket %s", errno ? strerror(errno) : "");
 
     sin.sin_family = AF_INET;
     sin.sin_port = htons(port);
@@ -504,8 +506,10 @@ SEXP C_ask(SEXP sHost, SEXP sPort, SEXP sCmd) {
     if (connect(ss, (struct sockaddr*)&sin, sizeof(sin)))
 	Rf_error("Unable to connect to %s:%d %s", host, port, errno ? strerror(errno) : "");
 
+    /* enable TCP_NODELAY */
     setsockopt(ss, IPPROTO_TCP, TCP_NODELAY, (const void*) &i, sizeof(i));
 
+    /* enable timeout so we can support R-level interrupts */
     tv.tv_sec = 1;
     tv.tv_usec = 0;
     setsockopt(ss, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
@@ -568,6 +572,8 @@ SEXP C_ask(SEXP sHost, SEXP sPort, SEXP sCmd) {
 	    dst = (char*) RAW(res);
 	    p -= (c - buf) + 1; /* eat the header */
 	    if (p > 0) {
+		if (p > pl) /* can't exceed payload */
+		    p = pl;
 		memcpy(dst, c + 1, p);
 		ii += p;
 	    }
