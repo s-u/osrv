@@ -117,6 +117,8 @@ static void add(sfs_ts ts, sfs_len_t el, sfs_len_t len, const void *buf) {
 	    }
 	    printf(" %02x", (int)((unsigned char*)buf)[i++]);
 	}
+    if (ts == CHARSXP || ts == SYMSXP)
+	printf(" (%s)", buf);
     printf("\n");
     if (buf)
 	buf_add(buf, len);
@@ -194,9 +196,24 @@ static void store(SEXP sWhat) {
     case SYMSXP:
 	{
 	    const char *p = CHAR(PRINTNAME(sWhat));
-	    add(TYPEOF(sWhat), 0, strlen(p) + 1, p);
+	    add(TYPEOF(sWhat), 0, *p ? strlen(p) + 1 : 0, p);
 	    break;
 	}
+    case CLOSXP:
+	add(TYPEOF(sWhat), 3, 0, 0);
+	store(FORMALS(sWhat));
+	/* FIXME: until we know how to handle byte code
+	   we store the expression, not the byte code */
+	if (TYPEOF(BODY(sWhat)) == BCODESXP)
+	    store(BODY_EXPR(sWhat));
+	else
+	    store(BODY(sWhat));
+	store(CLOENV(sWhat));
+	break;
+	
+	/*case BCODESXP:
+	  FIXME: how to handle byte code? */
+	
     case LISTSXP:
     case LANGSXP:
 	{
@@ -244,6 +261,8 @@ static SEXP decode_one(sfs_len_t hdr) {
     len >>= 8;
     Rprintf("[%s:%04lx]\n", type_name[ts], len);
     switch (ts) {
+    case NILSXP:
+	return R_NilValue;
     case INTSXP:
     case LGLSXP:
 	res = allocVector(ts, len);
@@ -259,6 +278,10 @@ static SEXP decode_one(sfs_len_t hdr) {
 	break;
     case SYMSXP:
 	{
+	    if (len == 0) {
+		res = R_MissingArg;
+		break;
+	    }
 	    if (len < sizeof(dec_buf)) {
 		fetch(dec_buf, len);
 		res = Rf_install(dec_buf);
@@ -307,7 +330,24 @@ static SEXP decode_one(sfs_len_t hdr) {
 	    }
 	    break;
 	}
-	
+
+    case CLOSXP:
+	{
+	    SEXP v;
+	    res = PROTECT(allocSExp(CLOSXP));
+	    v = decode();
+	    if (v != R_NilValue)
+		SET_FORMALS(res, v);
+	    v = decode();
+	    if (v != R_NilValue)
+		SET_BODY(res, v);
+	    v = decode();
+	    if (v != R_NilValue)
+		SET_CLOENV(res, v);
+	    UNPROTECT(1);
+	    break;
+	}
+
     case 255:
     case LISTSXP:
     case LANGSXP:
@@ -336,6 +376,9 @@ static SEXP decode_one(sfs_len_t hdr) {
 		UNPROTECT(3);
 	    break;
 	}
+    case ENVSXP:
+	Rf_warning("Environments are not serialized.");
+	break;
     default:
 	Rf_error("Unimplemented de-serialisation for %s (%d)", type_name[ts], (int)ts);
     }
@@ -354,6 +397,16 @@ static SEXP decode() {
     }
     res = decode_one(hdr);
     if (attr != R_NilValue) {
+	SEXP c = attr;
+	/* check for the "class" attribute
+	   so we can flag the object */
+	while (c != R_NilValue) {
+	    if (TAG(c) == R_ClassSymbol) {
+		SET_OBJECT(res, 1);
+		break;
+	    }
+	    c = CDR(c);
+	}
 	PROTECT(res);
 	SET_ATTRIB(res, attr);
 	UNPROTECT(2);
