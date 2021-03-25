@@ -24,7 +24,7 @@ start(host = NULL, port = 9012L, threads = 4L)
 put(key, value)
 clean()
 
-ask(cmd, host = "127.0.0.1", port = 9012L)
+ask(cmd, host = "127.0.0.1", port = 9012L, sfs = FALSE)
 }
 \arguments{
   \item{host}{string or \code{NULL}, IP address or host name of the
@@ -34,6 +34,8 @@ ask(cmd, host = "127.0.0.1", port = 9012L)
   \item{key}{string, key to use for retrieval}
   \item{value}{raw vector, payload to serve}
   \item{cmd}{command to send}
+  \item{sfs}{if \code{TRUE} then the payload is assumed to be in SFS format
+    and will be de-serialized on the fly}
 }
 \details{
   The current implementation allows only one server in the process at a

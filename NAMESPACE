@@ -1,2 +1,2 @@
-useDynLib(osrv, C_start, C_put, C_clean, C_ask)
+useDynLib(osrv, C_start, C_put, C_clean, C_ask, C_sock_restore, C_mem_store, C_mem_restore, C_stat_store)
 export(start, put, clean, ask)
