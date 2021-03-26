@@ -13,6 +13,10 @@
    and they are stored first */
 #define ATTRSXP 255
 
+#define SFS_EMPTY_ENV   0xf0000000000000
+#define SFS_GLOBAL_ENV  0xf0000000000001
+#define SFS_BASE_ENV    0xf0000000000002
+
 struct store_api {
     store_fn_t store;
     /* implementations can add anything here... */
@@ -79,7 +83,7 @@ static void store(store_api_t *api, SEXP sWhat) {
 	    api->store(api, TYPEOF(sWhat), 0, n, 0);
 	    while (i < n) {
 		const char *c = CHAR(STRING_ELT(sWhat, i));
-		api->store(api, CHARSXP, 0, strlen(c) + 1, c);
+		api->store(api, CHARSXP, 1, strlen(c) + 1, c);
 		i++;
 	    }
 	    break;
@@ -94,11 +98,11 @@ static void store(store_api_t *api, SEXP sWhat) {
     case SYMSXP:
 	{
 	    const char *p = CHAR(PRINTNAME(sWhat));
-	    api->store(api, TYPEOF(sWhat), 0, *p ? strlen(p) + 1 : 0, p);
+	    api->store(api, TYPEOF(sWhat), 1, *p ? strlen(p) + 1 : 0, p);
 	    break;
 	}
     case CLOSXP:
-	api->store(api, TYPEOF(sWhat), 3, 0, 0);
+	api->store(api, TYPEOF(sWhat), 0, 3, 0);
 	store(api, FORMALS(sWhat));
 	/* FIXME: until we know how to handle byte code
 	   we store the expression, not the byte code */
@@ -108,10 +112,9 @@ static void store(store_api_t *api, SEXP sWhat) {
 	    store(api, BODY(sWhat));
 	store(api, CLOENV(sWhat));
 	break;
-	
-	/*case BCODESXP:
-	  FIXME: how to handle byte code? */
-	
+
+	/*case BCODESXP: FIXME: how to handle byte code? */
+
     case LISTSXP:
     case LANGSXP:
 	{
@@ -130,6 +133,18 @@ static void store(store_api_t *api, SEXP sWhat) {
 	    }
 	    break;
 	}
+
+    case ENVSXP:
+	if (sWhat == R_GlobalEnv)
+	    api->store(api, TYPEOF(sWhat), 0, SFS_GLOBAL_ENV, 0);
+	else if (sWhat == R_EmptyEnv)
+	    api->store(api, TYPEOF(sWhat), 0, SFS_EMPTY_ENV, 0);
+	else if (sWhat == R_BaseEnv)
+	    api->store(api, TYPEOF(sWhat), 0, SFS_BASE_ENV, 0);
+	else /* unsupported ! */
+	    api->store(api, TYPEOF(sWhat), 0, 0, 0);
+	break;
+
     default:
 	api->store(api, TYPEOF(sWhat), 0, 0, 0);
     }
@@ -262,7 +277,14 @@ static SEXP decode_one(fetch_api_t *api, sfs_len_t hdr) {
 	    break;
 	}
     case ENVSXP:
-	Rf_warning("Environments are not serialized.");
+	if (len == SFS_GLOBAL_ENV)
+	    return R_GlobalEnv;
+	if (len == SFS_EMPTY_ENV)
+	    return R_EmptyEnv;
+	if (len == SFS_BASE_ENV)
+	    return R_BaseEnv;
+	Rf_warning("Custom environments are not serialized.");
+	return R_BaseEnv;
 	break;
     default:
 	Rf_error("Unimplemented de-serialisation for type %d", (int)ts);

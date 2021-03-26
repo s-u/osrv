@@ -20,8 +20,7 @@ struct store_api {
 };
 
 static void add(store_api_t *api, sfs_ts ts, sfs_len_t el, sfs_len_t len, const void *buf) {
-    if (el > 0)
-	len *= el;
+    len *= el;
     api->cs[ts]++;
     api->ls[ts] += len;
 }

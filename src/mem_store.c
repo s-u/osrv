@@ -116,8 +116,7 @@ static void add_buf(store_api_t *api, sfs_ts ts, sfs_len_t el, sfs_len_t len, co
     if (api->verb)
 	Rprintf("%06lx: [%6s:%06lx/%02lu] ", api->cptr, type_name[ts], len, el);
     api->cptr += 8;
-    if (el > 0)
-	len *= el;
+    len *= el;
     if (api->verb) {
 	if (buf)
 	    while (i < len) {
@@ -131,9 +130,10 @@ static void add_buf(store_api_t *api, sfs_ts ts, sfs_len_t el, sfs_len_t len, co
 	    Rprintf(" (%s)", buf);
 	Rprintf("\n");
     }
-    if (buf)
+    if (buf) {
 	buf_add(api, buf, len);
-    api->cptr += len;
+	api->cptr += len;
+    }
 }
 
 SEXP C_mem_store(SEXP sWhat, SEXP sVerb) {
