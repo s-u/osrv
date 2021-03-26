@@ -1,0 +1,42 @@
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+name: check
+
+jobs:
+  check:
+    runs-on: ${{ matrix.os }}
+
+    name: ${{ matrix.os }} (${{ matrix.r }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ 'macOS-10.15', 'ubuntu-20.04' ]
+        r:  [ 'release' ]
+
+    steps:
+      - uses: actions/checkout@v1
+
+      - uses: r-lib/actions/setup-r@master
+        with:
+          r-version: ${{ matrix.r }}
+
+      - name: Build
+        run: "bash -c '(cd .. && R CMD build osrv)'"
+
+      - name: R CMD check
+        run: "bash -c 'R CMD check --no-manual ../osrv_*.tar.gz'"
+
+      - name: Upload check results
+        if: failure()
+        uses: actions/upload-artifact@master
+        with:
+          name: ${{ runner.os }}-r${{ matrix.r }}-results
+          path: osrv.Rcheck
+
