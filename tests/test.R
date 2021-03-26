@@ -71,6 +71,9 @@ assert("statSFS", statSFS(iris),
 
        )
 
+assert("SFS with debugging info",
+       createSFS(iris, TRUE), x)
+
 unlink(tmp)
 
 section("Object Server with SFS")
