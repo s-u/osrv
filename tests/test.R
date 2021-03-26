@@ -73,4 +73,42 @@ assert("statSFS", statSFS(iris),
 
 unlink(tmp)
 
+section("Object Server with SFS")
+
+demo <- rbind(iris, iris)
+
+assert("Store in server with SFS",
+       put("demo", demo, sfs=TRUE))
+assert("Retrieve with SFS",
+       ask("GET demo\n", sfs=TRUE), demo)
+
+assert("Clean up",
+       ask("DEL demo\n") == "OK" && clean())
+
+section("Large data / memory management")
+
+base.mem <- gc()[2,2]
+cat("  Memory usage before:", base.mem, "Mb\n")
+x <- rnorm(2e7)
+store.mem <- gc()[2,2]
+cat("  With rnorm(2e7)    :", store.mem, "Mb\n")
+assert("Store ~152.6Mb",
+       put("x", x, sfs=TRUE))
+put.mem <- gc()[2,2]
+cat("  After put          :", put.mem, "Mb\n")
+assert("Check memory",
+       put.mem - base.mem < 154)
+assert("Retrieve",
+       identical(ask("GET x\n", sfs=TRUE), x))
+get.mem <- gc()[2,2]
+cat("  After get          :", get.mem, "Mb\n")
+rm(x)
+assert("Clean up",
+       ask("DEL x\n") == "OK" && clean())
+clean.mem <- gc()[2,2]
+cat("  After clean        :", clean.mem, "Mb\n")
+
+assert("Check for memory leaks",
+       clean.mem - base.mem < 1)
+
 cat("\nDONE\n\n")
