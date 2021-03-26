@@ -31,7 +31,7 @@ jobs:
         run: "bash -c '(cd .. && R CMD build osrv)'"
 
       - name: R CMD check
-        run: "bash -c 'R CMD check --no-manual ../osrv_*.tar.gz'"
+        run: "bash -c 'R CMD check --no-manual ../osrv_*.tar.gz && cat osrv.Rcheck/tests/test.Rout'"
 
       - name: Upload check results
         if: failure()
@@ -39,4 +39,3 @@ jobs:
         with:
           name: ${{ runner.os }}-r${{ matrix.r }}-results
           path: osrv.Rcheck
-
