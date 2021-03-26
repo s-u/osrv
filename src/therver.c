@@ -356,6 +356,9 @@ static int send_buf(int s, const char* buf, obj_len_t len) {
     return 0;
 }
 
+/* from fd_store.c */
+void fd_store(int s, SEXP sWhat);
+
 static void do_process(conn_t *c) {
     int s = c->s, n;
     work_t *w;
@@ -398,11 +401,19 @@ static void do_process(conn_t *c) {
 	    entry_t *o = obj_get(a, 0);
 	    /* printf("finding '%s' (%s)\n", a, o ? "OK" : "NF"); */
 	    if (o) {
-		snprintf(w->obuf, sizeof(w->obuf), "OK %lu\n",
-			 (unsigned long) o->len);
-		if (send_buf(s, w->obuf, strlen(w->obuf)) ||
-		    send_buf(s, o->obj, o->len))
+		if (!o->obj) { /* if obj is NULL if we have to serialise */
+		    static const char *ok_ser = "OK ?\n";
+		    if (send_buf(s, ok_ser, 5))
+			break;
+		    fd_store(s, o->sWhat);
 		    break;
+		} else {
+		    snprintf(w->obuf, sizeof(w->obuf), "OK %lu\n",
+			     (unsigned long) o->len);
+		    if (send_buf(s, w->obuf, strlen(w->obuf)) ||
+			send_buf(s, o->obj, o->len))
+			break;
+		}
 	    } else if (send_buf(s, "NF\n", 3))
 		break;
 	} else if (!strcmp("DEL", w->buf)) {
@@ -454,11 +465,14 @@ SEXP C_start(SEXP sHost, SEXP sPort, SEXP sThreads) {
     return ScalarLogical(1);
 }
 
-SEXP C_put(SEXP sKey, SEXP sWhat) {
-    if (TYPEOF(sKey) != STRSXP || LENGTH(sKey) != 1 || TYPEOF(sWhat) != RAWSXP)
-	Rf_error("invalid key/value");
+SEXP C_put(SEXP sKey, SEXP sWhat, SEXP sSFS) {
+    int use_sfs = asInteger(sSFS);
+    if (TYPEOF(sKey) != STRSXP || LENGTH(sKey) != 1)
+	Rf_error("Invalid key, must be a string");
+    if (!use_sfs && TYPEOF(sWhat) != RAWSXP)
+	Rf_error("Value must be a raw vector unless SFS is used");
     do_init();
-    obj_add(CHAR(STRING_ELT(sKey, 0)), sWhat, RAW(sWhat), XLENGTH(sWhat));
+    obj_add(CHAR(STRING_ELT(sKey, 0)), sWhat, use_sfs ? 0 : RAW(sWhat), use_sfs ? 0 : XLENGTH(sWhat));
     return ScalarLogical(1);
 }
 

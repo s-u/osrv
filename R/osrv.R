@@ -1,8 +1,8 @@
 start <- function(host=NULL, port=9012L, threads=4L)
     .Call(C_start, host, port, threads)
 
-put <- function(key, value)
-    .Call(C_put, key, value)
+put <- function(key, value, sfs=FALSE)
+    .Call(C_put, key, value, sfs)
 
 clean <- function()
     .Call(C_clean)
