@@ -338,6 +338,7 @@ static entry_t *obj_get(const char *key, int rm) {
 	    pthread_mutex_unlock(&obj_mutex);
 	    return e;
 	}
+	prev = e;
 	e = e->next;
     }
     pthread_mutex_unlock(&obj_mutex);
