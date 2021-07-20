@@ -25,12 +25,18 @@ assert("Start service",
        start())
 assert("Store",
        put("t1", as.raw(1:10)))
+assert("Store II",
+       put("t2", as.raw(5:15)))
 assert("Ask",
        ask("GET t1\n"), as.raw(1:10))
+assert("Ask II",
+       ask("GET t2\n"), as.raw(5:15))
 assert("Delete",
        ask("DEL t1\n"), "OK")
 assert("Ask deleted",
        ask("GET t1\n"), "NF")
+assert("DEL regression",
+       ask("GET t2\n"), as.raw(5:15))
 assert("Unsupported",
        ask("FOO BAR\n"), "UNSUPP")
 assert("Clean",
