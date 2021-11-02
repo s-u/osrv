@@ -1,3 +1,3 @@
-useDynLib(osrv, C_start, C_put, C_clean, C_ask, C_sock_restore, C_mem_store, C_mem_restore, C_stat_store, C_file_store, C_file_restore)
-export(start, put, clean, ask)
+useDynLib(osrv, C_start, C_put, C_clean, C_ask, C_sock_restore, C_mem_store, C_mem_restore, C_stat_store, C_file_store, C_file_restore, C_get)
+export(os.start, o.put, o.clean, os.ask, o.get)
 export(createSFS, readSFS, restoreSFS, saveSFS, statSFS)

@@ -22,25 +22,33 @@ assert <- function(test, val, expected=TRUE) {
 section("Object Server")
 
 assert("Start service",
-       start())
+       os.start())
 assert("Store",
-       put("t1", as.raw(1:10)))
+       o.put("t1", as.raw(1:10)))
 assert("Store II",
-       put("t2", as.raw(5:15)))
+       o.put("t2", as.raw(5:15)))
 assert("Ask",
-       ask("GET t1\n"), as.raw(1:10))
+       os.ask("GET t1\n"), as.raw(1:10))
 assert("Ask II",
-       ask("GET t2\n"), as.raw(5:15))
+       os.ask("GET t2\n"), as.raw(5:15))
 assert("Delete",
-       ask("DEL t1\n"), "OK")
+       os.ask("DEL t1\n"), "OK")
 assert("Ask deleted",
-       ask("GET t1\n"), "NF")
+       os.ask("GET t1\n"), "NF")
 assert("DEL regression",
-       ask("GET t2\n"), as.raw(5:15))
+       os.ask("GET t2\n"), as.raw(5:15))
 assert("Unsupported",
-       ask("FOO BAR\n"), "UNSUPP")
+       os.ask("FOO BAR\n"), "UNSUPP")
+assert("PUT",
+       os.ask("PUT t3\n3\n123"), "OK")
+assert("Local get",
+       o.get("t3"), charToRaw("123"))
+assert("Local rm",
+       o.get("t3", remove=TRUE), charToRaw("123"))
+assert("Local rm",
+       o.get("t3"), NULL)
 assert("Clean",
-       clean())
+       o.clean())
 
 section("SFS")
 
@@ -51,8 +59,8 @@ assert("Mem store/restore",
 }, iris)
 assert("osrv SFS support",
 {
-    put("iris", x)
-    ask("GET iris\n", sfs=TRUE)
+    o.put("iris", x)
+    os.ask("GET iris\n", sfs=TRUE)
 }, iris)
 assert("Closure serialisation",
 {
@@ -87,12 +95,26 @@ section("Object Server with SFS")
 demo <- rbind(iris, iris)
 
 assert("Store in server with SFS",
-       put("demo", demo, sfs=TRUE))
+       o.put("demo", demo, sfs=TRUE))
 assert("Retrieve with SFS",
-       ask("GET demo\n", sfs=TRUE), demo)
+       os.ask("GET demo\n", sfs=TRUE), demo)
 
 assert("Clean up",
-       ask("DEL demo\n") == "OK" && clean())
+       os.ask("DEL demo\n") == "OK" && o.clean())
+
+r <- createSFS(demo)
+assert("Remote PUT with SFS",
+       os.ask(c(charToRaw(
+         paste0("PUT demo2\n", length(r), "\n")), r)), "OK")
+
+assert("Local SFS get",
+       o.get("demo2", sfs=TRUE), demo)
+
+assert("Clean up",
+       identical(o.get("demo2", sfs=TRUE, remove=TRUE), demo) && o.clean())
+
+assert("Removal Check",
+       o.get("demo2"), NULL)
 
 section("Large data / memory management")
 
@@ -102,18 +124,18 @@ x <- rnorm(2e7)
 store.mem <- gc()[2,2]
 cat("  With rnorm(2e7)    :", store.mem, "Mb\n")
 assert("Store ~152.6Mb",
-       put("x", x, sfs=TRUE))
+       o.put("x", x, sfs=TRUE))
 put.mem <- gc()[2,2]
 cat("  After put          :", put.mem, "Mb\n")
 assert("Check memory",
        put.mem - base.mem < 154)
 assert("Retrieve",
-       identical(ask("GET x\n", sfs=TRUE), x))
+       identical(os.ask("GET x\n", sfs=TRUE), x))
 get.mem <- gc()[2,2]
 cat("  After get          :", get.mem, "Mb\n")
 rm(x)
 assert("Clean up",
-       ask("DEL x\n") == "OK" && clean())
+       os.ask("DEL x\n") == "OK" && o.clean())
 clean.mem <- gc()[2,2]
 cat("  After clean        :", clean.mem, "Mb\n")
 

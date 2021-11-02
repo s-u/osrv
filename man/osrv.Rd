@@ -1,30 +1,36 @@
 \name{osrv}
 \alias{osrv}
-\alias{start}
-\alias{put}
-\alias{clean}
-\alias{ask}
+\alias{os.start}
+\alias{o.put}
+\alias{o.get}
+\alias{o.clean}
+\alias{os.ask}
 \title{
   Manage Object Server
 }
 \description{
-  \code{start} starts the threaded TCP object server.
+  \code{os.start} starts the threaded TCP object server.
 
-  \code{put} puts objects into the object store that will be served to
+  \code{o.put} puts objects into the object store that will be served to
   clients connecting via TCP.
 
-  \code{clean} does the equivalent of a garbage collection on any
+  \code{o.get} retrieves an object from the object store.
+
+  \code{o.clean} does the equivalent of a garbage collection on any
   objects that were released by the serving threads.
 
-  \code{ask} is a rudimentary object server client that sends a command,
+  \code{os.ask} is a rudimentary object server client that sends a command,
   awaits a response and closes the connection.
 }
 \usage{
-start(host = NULL, port = 9012L, threads = 4L)
-put(key, value, sfs = FALSE)
-clean()
+os.start(host = NULL, port = 9012L, threads = 4L)
 
-ask(cmd, host = "127.0.0.1", port = 9012L, sfs = FALSE)
+o.put(key, value, sfs = FALSE)
+o.get(key, sfs = FALSE, remove = FALSE)
+
+o.clean()
+
+os.ask(cmd, host = "127.0.0.1", port = 9012L, sfs = FALSE)
 }
 \arguments{
   \item{host}{string or \code{NULL}, IP address or host name of the
@@ -35,6 +41,8 @@ ask(cmd, host = "127.0.0.1", port = 9012L, sfs = FALSE)
   \item{key}{string, key to use for retrieval}
   \item{value}{payload to serve. If \code{sfs=FALSE} then it must be a
     raw vector.}
+  \item{remove}{logical, if \code{TRUE} then the object is removed
+    once retrieved}.
   \item{cmd}{string, command to send}
   \item{sfs}{if \code{TRUE} then SFS serialisation on-the-fly is used
     (see details)}
@@ -70,23 +78,26 @@ ask(cmd, host = "127.0.0.1", port = 9012L, sfs = FALSE)
 }
 \examples{
  ## start the TCP server
- start()
+ os.start()
  ## put an object under the key "foo"
- put("foo", charToRaw("bar"))
+ o.put("foo", charToRaw("bar"))
 
- (r <- ask("GET foo\n"))
+ (r <- os.ask("GET foo\n"))
  rawToChar(r)
 
+ ## check locally
+ o.get("foo")
+
  ## delete "foo"
- ask("DEL foo\n")
+ os.ask("DEL foo\n")
 
  ## it should be removed now so NF (not found)
- ask("GET foo\n")
+ os.ask("GET foo\n")
 
  ## SFS
- put("iris", iris, sfs=TRUE)
+ o.put("iris", iris, sfs=TRUE)
 
  ## check if it's the same
- identical(ask("GET iris\n", sfs=TRUE), iris)
+ identical(os.ask("GET iris\n", sfs=TRUE), iris)
 }
 \keyword{system}

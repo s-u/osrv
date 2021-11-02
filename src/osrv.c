@@ -19,6 +19,17 @@ reponses:
   "OK\n" - found and removed
   "NF\n" - not found
 
+request: "HAS "<key>\n
+responses:
+  "OK\n" - object found
+  "NF\n"   - object not found
+
+request: "PUT "<key>\n<size>\n
+responses:
+  "OK\n"  - success
+  "INV\n" - invalid parameter (here length)
+  "ERR\n" - error (out of memory)
+
 all other requests:
 response:
   "UNSUPP\n" - unsupported
@@ -76,7 +87,7 @@ void fd_store(int s, SEXP sWhat);
 static void do_process(conn_t *c) {
     int s = c->s, n;
     work_t *w;
-    char *d, *e, *a;
+    char *d, *e, *a, *be;
     
     /* make sure c is valid, allocate work_t if needed */
     if (s < 0 || (!c->data && !(c->data = calloc(1, sizeof(work_t)))))
@@ -94,6 +105,8 @@ static void do_process(conn_t *c) {
 	if (n < 1)
 	    break;
 
+	be = w->buf + n; /* buffer end (byte past the last payload) */
+	be[0] = 0; /* ensure it is terminated */
 	d = strchr(w->buf, '\n');
 	if (d) {
 	    while (d >= w->buf && (*d == '\r' || *d == '\n'))
@@ -110,23 +123,31 @@ static void do_process(conn_t *c) {
 	while (*a == ' ' || *a == '\t')
 	    a++;
 	*e = 0;
+
+	/* fprintf(stderr, "INFO: cmd='%s', arg='%s'\n", w->buf, a); */
+	
 	/* w->buf is cmd, a = arg */
-	if (!strcmp("GET", w->buf)) {
+	if (!strcmp("GET", w->buf) || !strcmp("HAS", w->buf)) {
 	    obj_entry_t *o = obj_get(a, 0);
 	    /* printf("finding '%s' (%s)\n", a, o ? "OK" : "NF"); */
 	    if (o) {
-		if (!o->obj) { /* if obj is NULL if we have to serialise */
-		    static const char *ok_ser = "OK ?\n";
-		    if (send_buf(s, ok_ser, 5))
+		if (w->buf[0] == 'H') { /* HAS -> OK */
+		    if (send_buf(s, "OK\n", 3))
 			break;
-		    fd_store(s, o->sWhat);
-		    break;
 		} else {
-		    snprintf(w->obuf, sizeof(w->obuf), "OK %lu\n",
-			     (unsigned long) o->len);
-		    if (send_buf(s, w->obuf, strlen(w->obuf)) ||
-			send_buf(s, o->obj, o->len))
+		    if (!o->obj) { /* if obj is NULL if we have to serialise */
+			static const char *ok_ser = "OK ?\n";
+			if (send_buf(s, ok_ser, 5))
+			    break;
+			fd_store(s, o->sWhat);
 			break;
+		    } else {
+			snprintf(w->obuf, sizeof(w->obuf), "OK %lu\n",
+				 (unsigned long) o->len);
+			if (send_buf(s, w->obuf, strlen(w->obuf)) ||
+			    send_buf(s, o->obj, o->len))
+			    break;
+		    }
 		}
 	    } else if (send_buf(s, "NF\n", 3))
 		break;
@@ -135,6 +156,61 @@ static void do_process(conn_t *c) {
 	    int res = o ? send_buf(s, "OK\n", 3) : send_buf(s, "NF\n", 3);
 	    if (res)
 		break;
+	} else if (!strcmp("PUT", w->buf)) {
+	    long len = -1;
+	    if (d < be) {
+		d++;
+		while (*d == '\r' || *d == '\n') d++;
+		if (*d == '?' && (d[1] == '\n' || d[1] == '\r')) {
+		    d++;
+		    if (*d == '\r' && d[1] == '\n') d++;
+		    d++;
+		} else if (*d >= '0' && *d <= '9') {
+		    len = atol(d);
+		    while (*d >= '0' && *d <= '9') d++;
+		    if (len < 0 || (*d != '\r' && *d != '\n')) {
+			send_buf(s, "INV\n", 4);
+			break;
+		    }
+		    if (*d == '\r' && d[1] == '\n') d++;
+		    d++;
+		} else {
+		    send_buf(s, "INV\n", 4);
+		    break;
+		}
+	    } else {
+		send_buf(s, "INV\n", 4);
+		break;
+	    }
+	    if (len > 0) {
+		char *db = (char*) malloc(len);
+		long pos = 0;
+		if (!db) {
+		    send_buf(s, "ERR\n", 4);
+		    break;
+		}
+		if (d < be) { /* buf did include the payload? */
+		    if (be - d >= len) {
+			memcpy(db, d, len);
+			obj_add(a, 0, db, len);
+			send_buf(s, "OK\n", 3);
+			if (be - d > len) /* we fetched more than we need, close */
+			    break;
+		    }
+		    pos = (long) (be - d);
+		    memcpy(db, d, pos);
+		}
+		while (pos < len) {
+		    int need = (int) (((len - pos) > FETCH_SIZE) ? FETCH_SIZE : (len - pos));
+		    int n = recv(s, db + pos, need, 0);
+		    if (n < 1)
+			break;
+		    pos += n;
+		}
+	    } else { /* we don't support unknown sizes yet */
+		if (send_buf(s, "UNSUPP\n", 7))
+		    break;
+	    }
 	} else {
 	    if (send_buf(s, "UNSUPP\n", 7))
 		break;
