@@ -17,6 +17,9 @@ static int obj_init_ = 0;
 
 #define OSRV_OBJ_STRUCT_ 1
 #include "obj.h"
+#ifndef NO_DEPS
+#include "deps.h"
+#endif
 
 /* structure of the object entry */
 struct obj_entry_s {
@@ -43,6 +46,9 @@ void obj_add(const char *key, SEXP sWhat, void *data, obj_len_t len) {
     pthread_mutex_lock(&obj_mutex);
     e->next = obj_root;
     obj_root = e;
+#ifndef NO_DEPS
+    deps_complete(key);
+#endif
     pthread_mutex_unlock(&obj_mutex);
 }
 
@@ -60,9 +66,8 @@ void obj_gc() {
     pthread_mutex_unlock(&obj_mutex);
 }
 
-obj_entry_t *obj_get(const char *key, int rm) {
+static obj_entry_t *obj_get_(const char *key, int rm) {
     obj_entry_t *e = obj_root, *prev = 0;
-    pthread_mutex_lock(&obj_mutex);
     while (e) {
 	if (!strcmp(key, e->key)) {
 	    if (rm) {
@@ -73,7 +78,6 @@ obj_entry_t *obj_get(const char *key, int rm) {
 		e->next = obj_gc_pool;
 		obj_gc_pool = e;
 	    }
-	    pthread_mutex_unlock(&obj_mutex);
 	    return e;
 	}
 	prev = e;
@@ -83,9 +87,18 @@ obj_entry_t *obj_get(const char *key, int rm) {
     return 0;
 }
 
+obj_entry_t *obj_get(const char *key, int rm) {
+    obj_entry_t *obj;
+    pthread_mutex_lock(&obj_mutex);
+    obj = obj_get_(key, rm);
+    pthread_mutex_unlock(&obj_mutex);
+    return obj;
+}
+
 void obj_init() {
     if (!obj_init_) {
 	pthread_mutex_init(&obj_mutex, 0);
 	obj_init_ = 1;
+	dep_init();
     }
 }
