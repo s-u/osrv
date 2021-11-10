@@ -26,3 +26,7 @@ typedef void (*process_fn_t)(conn_t*);
    Returns non-zero for errors. */
 int therver(const char *host, int port, int max_threads, process_fn_t process_fn);
 
+/* this is a bit of a hack - therver was always intended
+   as a stand-alone server, but now we have HTTP and OSRV
+   so we can't run both ... */
+extern int therver_id;

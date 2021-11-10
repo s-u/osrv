@@ -29,7 +29,6 @@ typedef void (*process_fn_t)(conn_t*);
    Returns non-zero for errors. */
 int therver(const char *host, int port, int max_threads, process_fn_t process_fn);
 
-
 /* ------ cut here ------ */
 
 /* --- implementation --- */
@@ -55,6 +54,8 @@ int therver(const char *host, int port, int max_threads, process_fn_t process_fn
 
 #define SOCKET int
 #define closesocket(X) close(X)
+
+int therver_id = 0;
 
 volatile int active = 1;
 
@@ -128,12 +129,30 @@ static int add_task(qentry_t *me) {
     return 0;
 }
 
-/* this is not absolutely safe, but fork() is asking for trouble anyway,
-   so we only make sure that the child does not process anything and
-   closes all its sockets. If any communications are in-flight,
-   it's anyone's guess what will hapen since we don't try to join the threads
-   before forking (which would be the only way to do this safely).
-*/
+/* we have to grab the mutex - you should NOT
+   fork in the critical region (we don't ..)
+   The good news is that fork() *only* copies
+   the thread that called the fork() and we
+   know that none of ours did, so none of
+   the threads should be impacted.
+ */
+static void prefork() {
+    pthread_mutex_lock(&pool_mutex);
+}
+
+/* nothing to do, just release the mutex
+   and we can go about our business */
+static void forked_parent() {
+    pthread_mutex_unlock(&pool_mutex);  
+}
+
+/* we want to close all sockets in the child
+   to make sure it won't interfere with the
+   parent's communication. Note that although
+   we signal the server thread to quit, it
+   certainly didn't call fork() so it's just
+   a theoretical case since we pretty much know
+   it wasn't copied into the child */
 static void forked_child() {
     qentry_t *me;
     /* make accept thread quit */
@@ -149,6 +168,7 @@ static void forked_child() {
 	me->c.s = -1;
 	me = me->next;
     }
+    pthread_mutex_unlock(&pool_mutex);
 }
 
 /* thread for the incoming connections */
@@ -216,7 +236,7 @@ static int start_threads(int max_threads) {
 
     /* in case the user uses multicore or something else, we want to shut down
        all proessing in the children (not perfect, see comments above) */
-    pthread_atfork(0, 0, forked_child);
+    pthread_atfork(prefork, forked_parent, forked_child);
 
     return 0;
 }
