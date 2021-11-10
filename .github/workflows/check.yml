@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ 'macOS-10.15', 'ubuntu-20.04' ]
-        r:  [ 'release' ]
+        r:  [ devel ]
 
     steps:
       - uses: actions/checkout@v1
@@ -27,11 +27,12 @@ jobs:
         with:
           r-version: ${{ matrix.r }}
 
-      - name: Build
-        run: "bash -c '(cd .. && R CMD build osrv)'"
-
-      - name: R CMD check
-        run: "bash -c 'R CMD check --no-manual ../osrv_*.tar.gz && cat osrv.Rcheck/tests/test.Rout'"
+      - uses: s-u/R-actions/pkg-check@master
+        with:
+          check-flags: --as-cran
+          
+      - name: Show test output
+        run: cat osrv.Rcheck/tests/test.Rout
 
       - name: Upload check results
         if: failure()
