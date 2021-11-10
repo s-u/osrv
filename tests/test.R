@@ -146,10 +146,14 @@ section("HTTP Server")
 
 if (requireNamespace("httr", quietly=TRUE)) {
 
+## manual partial import from httr
+hs <- asNamespace("httr")
+e <- environment()
+for (fn in c("GET", "PUT", "POST", "HEAD", "DELETE",
+    "status_code", "headers", "content")) e[[fn]] <- hs[[fn]]
+
 assert("Start http",
        os.start(port=8089, protocol="http"))
-
-library(httr)
 
 assert("PUT",
        status_code(PUT("http://127.0.0.1:8089/data/foo", body=charToRaw("bar"), encode="raw")),

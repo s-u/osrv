@@ -6,3 +6,4 @@ Maintainer: Simon Urbanek <simon.urbanek@R-project.org>
 Description: Simple threaded TCP server that allows the retrieval
 	     of objects from an R process without blocking.
 License: MIT + file LICENSE
+Suggests: httr
