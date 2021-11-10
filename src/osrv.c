@@ -238,12 +238,8 @@ SEXP C_start(SEXP sHost, SEXP sPort, SEXP sThreads) {
     if (threads < 1 || threads > 1000)
 	Rf_error("Invalid number of threads %d", threads);
 
-    if (therver_id)
-	Rf_error("Server is already running, can only start one");
-    therver_id++;	    
-
     obj_init();
-    if (therver(host, port, threads, do_process))
+    if (!therver(host, port, threads, do_process))
 	return ScalarLogical(0);
 
     Rprintf("OSRV: started on %s:%d, try me.\n", host ? host : "*", port);

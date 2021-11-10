@@ -11,25 +11,7 @@
    (work in progress, ports expected eventually)
 */
 
-/* --- interface --- */
-
-typedef struct conn_s {
-    int s; /* socket to the client */
-    void *data; /* opaque per-thread pointer */
-} conn_t;
-
-/* The process(conn_t*) API:
-   You don't own the parameter, but it is guaranteed
-   to live until you return. If you close the socket
-   you must also set s = -1 to indicate you did so,
-   otherwise the socket is automatically closed. */
-typedef void (*process_fn_t)(conn_t*);
-
-/* Binds host/port, then starts threads, host can be NULL for ANY.
-   Returns non-zero for errors. */
-int therver(const char *host, int port, int max_threads, process_fn_t process_fn);
-
-/* ------ cut here ------ */
+#include "therver.h"
 
 /* --- implementation --- */
 
@@ -57,15 +39,6 @@ int therver(const char *host, int port, int max_threads, process_fn_t process_fn
 
 int therver_id = 0;
 
-volatile int active = 1;
-
-static int ss;
-
-static process_fn_t process;
-
-static pthread_t *worker_threads;
-static pthread_t accept_thread;
-
 typedef struct qentry_s {
     /* used for queuing */
     struct qentry_s *prev, *next;
@@ -73,35 +46,59 @@ typedef struct qentry_s {
     conn_t c;
 } qentry_t;
 
-static qentry_t root;
-static pthread_mutex_t pool_mutex;
-static pthread_cond_t pool_work_cond;
+struct therver_s {
+    volatile int active;
+    int ss;
 
-static void *worker_thread(void *pool_arg) {
+    process_fn_t process;
+
+    pthread_t *worker_threads;
+    pthread_t accept_thread;
+
+    qentry_t root;
+    pthread_mutex_t pool_mutex;
+    pthread_cond_t pool_work_cond;
+
+    /* we keep all thervers recorded to support fork() handling */
+    struct therver_s *next;
+};
+
+static therver_t *first_therver;
+
+static void *worker_thread(void *arg) {
+    therver_t *t = (therver_t*) arg;
     qentry_t *me;
     void *data = 0;
     /* printf("worker_thread %p is a go\n", (void*)&me); */
-    while (active) {
+    while (t->active) {
 	/* lock queue mutex */
-	pthread_mutex_lock(&pool_mutex);
+	pthread_mutex_lock(&(t->pool_mutex));
 	/* printf("worker %p waiting\n", (void*)&me); */
 	
 	/* wait on condition until we get work */
-	while (!(me = root.next) || me == &root) 
-	    pthread_cond_wait(&pool_work_cond, &pool_mutex);
+	/* FIXME: we should use timed wait in case something gets
+	   stuck and we get a shutdown */
+	while (t->active && (!(me = t->root.next) || me == &t->root))
+	    pthread_cond_wait(&t->pool_work_cond, &t->pool_mutex);
+
+	/* if the server was shut down, don't process anything in the queue */
+	if (!t->active) {
+	    pthread_mutex_unlock(&t->pool_mutex);
+	    break;
+	}
 
 	/* remove us from the queue */
-	root.next = me->next;
-	if (me->next) me->next->prev = &root;
+	t->root.next = me->next;
+	if (me->next) me->next->prev = &t->root;
 	/* we don't care to update our prev/next since we never use it */
 
 	/* release queue lock */
-	pthread_mutex_unlock(&pool_mutex);
+	pthread_mutex_unlock(&t->pool_mutex);
 
 	/* printf("worker %p calling process() with s=%d\n", (void*)&me, me->c.s); */
 	me->c.data = data;
 	/* serve the connection */
-	process(&me->c);
+	t->process(&me->c);
 	data = me->c.data;
 
 	/* clean up */
@@ -114,17 +111,17 @@ static void *worker_thread(void *pool_arg) {
 }
 
 /* me must be free()-able and we take ownership */
-static int add_task(qentry_t *me) {
+static int add_task(therver_t *t, qentry_t *me) {
     /* printf("add_task(%d) about to lock\n", me->c.s); */
-    pthread_mutex_lock(&pool_mutex);
+    pthread_mutex_lock(&t->pool_mutex);
     /* printf(" add_task() locked, adding\n"); */
-    me->next = &root;
-    me->prev = root.prev;
+    me->next = &t->root;
+    me->prev = t->root.prev;
     if (me->prev) me->prev->next = me;
-    root.prev = me;
+    t->root.prev = me;
     /* printf(" add_task() broadcasting\n"); */
-    pthread_cond_broadcast(&pool_work_cond);
-    pthread_mutex_unlock(&pool_mutex);
+    pthread_cond_broadcast(&t->pool_work_cond);
+    pthread_mutex_unlock(&t->pool_mutex);
     /* printf(" add_task() unlocked\n"); */
     return 0;
 }
@@ -137,13 +134,21 @@ static int add_task(qentry_t *me) {
    the threads should be impacted.
  */
 static void prefork() {
-    pthread_mutex_lock(&pool_mutex);
+    therver_t *t = first_therver;
+    while (t) {
+	pthread_mutex_lock(&t->pool_mutex);
+	t = t->next;
+    }
 }
 
 /* nothing to do, just release the mutex
    and we can go about our business */
 static void forked_parent() {
-    pthread_mutex_unlock(&pool_mutex);  
+    therver_t *t = first_therver;
+    while (t) {
+	pthread_mutex_unlock(&t->pool_mutex);
+	t = t->next;
+    }
 }
 
 /* we want to close all sockets in the child
@@ -154,32 +159,39 @@ static void forked_parent() {
    a theoretical case since we pretty much know
    it wasn't copied into the child */
 static void forked_child() {
-    qentry_t *me;
-    /* make accept thread quit */
-    active = 0;
-    /* close server socket */
-    closesocket(ss);
-    ss = -1;
-    /* close and reset all sockets in the queue */
-    me = root.next;
-    while (me && me != &root) {
-	if (me->c.s != -1)
-	    closesocket(me->c.s);
-	me->c.s = -1;
-	me = me->next;
+    therver_t *t = first_therver;
+    while (t) {
+	qentry_t *me;
+	/* make accept thread quit */
+	t->active = 0;
+	/* close server socket */
+	if (t->ss != -1) {
+	    closesocket(t->ss);
+	    t->ss = -1;
+	}
+	/* close and reset all sockets in the queue */
+	me = t->root.next;
+	while (me && me != &t->root) {
+	    if (me->c.s != -1)
+		closesocket(me->c.s);
+	    me->c.s = -1;
+	    me = me->next;
+	}
+	pthread_mutex_unlock(&t->pool_mutex);
+	t = t->next;
     }
-    pthread_mutex_unlock(&pool_mutex);
 }
 
 /* thread for the incoming connections */
-static void *accept_thread_run(void *nothing) {
+static void *accept_thread_run(void *th) {
+    therver_t *t = (therver_t*) th;
     int s;
     socklen_t cli_al;
     struct sockaddr_in sin_cli;
     /* printf("accept_thread %p is a go\n", (void*)&s); */
-    while (active) {
+    while (t->active) {
 	cli_al = sizeof(sin_cli);
-	s = accept(ss, (struct sockaddr*) &sin_cli, &cli_al);
+	s = accept(t->ss, (struct sockaddr*) &sin_cli, &cli_al);
 	/* printf("accept_thread: accept=%d\n", s); */
 	if (s != -1) {
 	    qentry_t *me = (qentry_t*) calloc(1, sizeof(qentry_t));
@@ -188,7 +200,7 @@ static void *accept_thread_run(void *nothing) {
 		   On any kind of error we have to free it. */
 		/* printf(" - accept_thread got me, enqueuing\n"); */
 		me->c.s = s;
-		if (add_task(me)) {
+		if (add_task(t, me)) {
 		    /* printf(" - add_task() failed, oops\n"); */
 		    free(me);
 		    me = 0;
@@ -198,26 +210,35 @@ static void *accept_thread_run(void *nothing) {
 		close(s);
 	}
     }
-    close(ss);
-    ss = -1;
+    close(t->ss);
+    t->ss = -1;
     return 0;
 }
 
-static int start_threads(int max_threads) {
+static int atfork_set = 0;
+
+static int start_threads(therver_t *t, int max_threads) {
     sigset_t mask, omask;
     pthread_attr_t t_attr;
     pthread_attr_init(&t_attr); /* all out threads are detached since we don't care */
     pthread_attr_setdetachstate(&t_attr, PTHREAD_CREATE_DETACHED);
 
-    root.next = root.prev = &root;
-    root.c.s = -1;
+    t->root.next = t->root.prev = &t->root;
+    t->root.c.s = -1;
 
-    if (!(worker_threads = malloc(sizeof(pthread_t) * max_threads)))
+    if (!(t->worker_threads = malloc(sizeof(pthread_t) * max_threads)))
 	return -1;
 
     /* init cond/mutex */
-    pthread_mutex_init(&pool_mutex, 0);
-    pthread_cond_init(&pool_work_cond, 0);
+    pthread_mutex_init(&t->pool_mutex, 0);
+    pthread_cond_init(&t->pool_work_cond, 0);
+
+    if (!atfork_set) {
+	/* in case the user uses multicore or something else, we want to shut down
+	   all proessing in the children */
+	pthread_atfork(prefork, forked_parent, forked_child);
+	atfork_set = 1;
+    }
 
     /* mask all signals - the threads will inherit the mask
        and thus not fire and leave it to R */
@@ -226,25 +247,25 @@ static int start_threads(int max_threads) {
 
     /* start worker threads */
     for (int i = 0; i < max_threads; i++)
-	pthread_create(&worker_threads[i], &t_attr, worker_thread, 0);
+	pthread_create(&t->worker_threads[i], &t_attr, worker_thread, t);
 
     /* start accept thread */
-    pthread_create(&accept_thread, &t_attr, accept_thread_run, 0);
+    pthread_create(&t->accept_thread, &t_attr, accept_thread_run, t);
 
     /* re-set the mask back for the main thread */
     sigprocmask(SIG_SETMASK, &omask, 0);
 
-    /* in case the user uses multicore or something else, we want to shut down
-       all proessing in the children (not perfect, see comments above) */
-    pthread_atfork(prefork, forked_parent, forked_child);
-
     return 0;
 }
 
-int therver(const char *host, int port, int max_threads, process_fn_t process_fn) {
-    int i;
+therver_t *therver(const char *host, int port, int max_threads, process_fn_t process_fn) {
+    therver_t *t;
+    int i, ss;
     struct sockaddr_in sin;
     struct hostent *haddr;
+
+    if (!(t = (therver_t*) calloc(1, sizeof(therver_t))))
+	return 0;
 
     ss = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -270,11 +291,43 @@ int therver(const char *host, int port, int max_threads, process_fn_t process_fn
     }
     if (ss == -1) {
         perror("ERROR: failed to bind or listen");
-        return 1;
+	free(t);
+        return 0;
     }
 
-    process = process_fn;
-    
-    return start_threads(max_threads);
+    t->ss = ss;
+    t->active = 1;
+    t->process = process_fn;
+
+    /* record this one in the list of thervers for fork() handling */
+    if (!first_therver)
+	first_therver = t;
+    else {
+	therver_t *x = first_therver;
+	while (x->next)
+	    x = x->next;
+	x->next = t;
+    }
+
+    if (start_threads(t, max_threads)) {
+	close(ss);
+	t->active = 0;
+	t->ss = -1;
+	/* we cannot safely release any therver that has been registered
+	   so it will stay there */
+	return 0;
+    }
+
+    return t;
 }
 
+int therver_shutdown(therver_t *th) {
+    /* we don't actually do anything other than signalling
+       the therver to shut down */
+    if (th) {
+	th->active = 0;
+	/* FIXME: we should signal the workers ... */
+	return 0;
+    }
+    return -1; /* invalid th */
+}

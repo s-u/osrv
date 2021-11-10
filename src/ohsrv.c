@@ -116,17 +116,13 @@ SEXP C_start_http(SEXP sHost, SEXP sPort, SEXP sThreads) {
     int port = Rf_asInteger(sPort);
     int threads = Rf_asInteger(sThreads);
 
-    if (therver_id)
-	Rf_error("Server is already running, can only start one");
-    therver_id++;	    
-
     if (port < 1 || port > 65535)
 	Rf_error("Invalid port %d", port);
     if (threads < 1 || threads > 1000)
 	Rf_error("Invalid number of threads %d", threads);
 
     obj_init();
-    if (therver(host, port, threads, do_process))
+    if (!therver(host, port, threads, do_process))
 	return ScalarLogical(0);
 
     Rprintf("HTTP: started on %s:%d, try me.\n", host ? host : "*", port);

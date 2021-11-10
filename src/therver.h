@@ -1,14 +1,11 @@
 /* Simple threaded TCP server (therver), based on a
    FIFO queue and worker threads. It is intended to
    run entirely in a parallel to the main thread.
-   Also intentionally it uses static variables,
-   the only dynamically allocated pieces are
-   a) the thread pool and b) the queue entries
 
    Author and (c) Simon Urbanek <urbanek@R-project.org>
    License: MIT
 
-   --- interface --- */
+*/
 
 typedef struct conn_s {
     int s;      /* socket to the client */
@@ -22,11 +19,20 @@ typedef struct conn_s {
    otherwise the socket is automatically closed. */
 typedef void (*process_fn_t)(conn_t*);
 
+/* opaque therver structure */
+typedef struct therver_s therver_t;
+
 /* Binds host/port, then starts threads, host can be NULL for ANY.
    Returns non-zero for errors. */
-int therver(const char *host, int port, int max_threads, process_fn_t process_fn);
+therver_t *therver(const char *host, int port, int max_threads, process_fn_t process_fn);
 
-/* this is a bit of a hack - therver was always intended
-   as a stand-alone server, but now we have HTTP and OSRV
-   so we can't run both ... */
-extern int therver_id;
+/* shuts down the therver, the handle may no longer be used. */
+int therver_shutdown(therver_t *th);
+
+/* NOTE: To avoid threading issues, thervers are never actually
+   released. They can be asked to shut down, but the resources
+   associated with a therver are possibly never released in case
+   children threads have outstanding work. At this point you cannot
+   assume that you may re-start a therver on the same port as
+   a previously started therver. We may change this in the
+   future. */
