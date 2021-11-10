@@ -142,4 +142,56 @@ cat("  After clean        :", clean.mem, "Mb\n")
 assert("Check for memory leaks",
        clean.mem - base.mem < 1)
 
+section("HTTP Server")
+
+if (requireNamespace("httr", quietly=TRUE)) {
+
+assert("Start http",
+       os.start(port=8089, protocol="http"))
+
+library(httr)
+
+assert("PUT",
+       status_code(PUT("http://127.0.0.1:8089/data/foo", body=charToRaw("bar"), encode="raw")),
+       200L)
+
+assert("GET", {
+  r <- GET("http://127.0.0.1:8089/data/foo")
+  identical(status_code(r), 200L) &&
+  identical(content(r), charToRaw("bar")) })
+
+assert("o.get", o.get("foo"), charToRaw("bar"))
+
+assert("HEAD", {
+  r <- GET("http://127.0.0.1:8089/data/foo")
+  identical(status_code(r), 200L) &&
+  identical(as.numeric(headers(r)$`content-length`), 3) })
+
+assert("DELETE",
+       status_code(DELETE("http://127.0.0.1:8089/data/foo")),
+       200L)
+
+assert("HEAD on non-existent",
+       status_code(HEAD("http://127.0.0.1:8089/data/foo")),
+       404L)
+
+assert("GET on non-existent",
+       status_code(GET("http://127.0.0.1:8089/data/foo")),
+       404L)
+
+assert("local get", o.get("foo"), NULL)
+
+assert("local put", o.put("foo2", charToRaw("bar2")))
+
+assert("GET on local put", {
+  r <- GET("http://127.0.0.1:8089/data/foo2")
+  identical(status_code(r), 200L) &&
+  identical(content(r), charToRaw("bar2")) })
+
+assert("local get + remove", o.get("foo2", remove=TRUE), charToRaw("bar2"))
+
+} else {
+  cat("WARNING: httr not found, cannot perfrom HTTP tests.\n\n")
+}
+
 cat("\nDONE\n\n")
