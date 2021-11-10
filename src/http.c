@@ -1,3 +1,10 @@
+/* Simple implementation of the HTTP(s) 1.x server protocol
+
+   (c)2008-2021 Simon Urbanek
+
+   License: MIT
+
+*/
 
 #include "tls.h"
 #include "http.h"
@@ -28,26 +35,26 @@
 #define PART_BODY    2
 
 struct buffer {
-    struct buffer *next, *prev;
-    int size, length;
-    char data[1];
+	struct buffer *next, *prev;
+	int size, length;
+	char data[1];
 };
 
 struct http_connection {
-    SOCKET s;
-    recv_fn_t recv;
-    send_fn_t send;
-    void *res;
-    
-    http_request_t *request;
+	SOCKET s;
+	recv_fn_t recv;
+	send_fn_t send;
+	void *res;
+
+	http_request_t *request;
 
 	http_process_callback process;
-	
-    int flags;
+
+	int flags;
 	int part;
 
-    char *line_buf;                  /* line buffer (used for request and headers) */
-    unsigned int line_pos, body_pos; /* positions in the buffers */
+	char *line_buf;                  /* line buffer (used for request and headers) */
+	unsigned int line_pos, body_pos; /* positions in the buffers */
 	struct buffer *headers;
 };
 
@@ -62,33 +69,35 @@ struct http_connection {
 
 /* free buffers starting from the tail(!!) */
 static void free_buffer(struct buffer *buf) {
-    if (!buf) return;
-    if (buf->prev) free_buffer(buf->prev);
-    free(buf);
+	if (!buf) return;
+	if (buf->prev)
+		free_buffer(buf->prev);
+	free(buf);
 }
 
 /* allocate a new buffer */
 static struct buffer *alloc_buffer(int size, struct buffer *parent) {
-    struct buffer *buf = (struct buffer*) malloc(sizeof(struct buffer) + size);
-    if (!buf) return buf;
-    buf->next = 0;
-    buf->prev = parent;
-    if (parent) parent->next = buf;
-    buf->size = size;
-    buf->length = 0;
-    return buf;
+	struct buffer *buf = (struct buffer*) malloc(sizeof(struct buffer) + size);
+	if (!buf) return buf;
+	buf->next = 0;
+	buf->prev = parent;
+	if (parent)
+		parent->next = buf;
+	buf->size = size;
+	buf->length = 0;
+	return buf;
 }
 
 /* convert doubly-linked buffers into one big raw vector */
 static raw_t *collect_buffers(struct buffer *buf) {
-    raw_t *res;
-    char  *dst;
-    size_t len = 0;
-    if (!buf) return 0;
-    while (buf->prev) { /* count the total length and find the root */
+	raw_t *res;
+	char  *dst;
+	size_t len = 0;
+	if (!buf) return 0;
+	while (buf->prev) { /* count the total length and find the root */
 		len += buf->length;
 		buf = buf->prev;
-    }
+	}
 	res = (raw_t*) malloc(sizeof(raw_t) + len + buf->length);
 	if (res) {
 		res->length = len + buf->length;
@@ -99,23 +108,23 @@ static raw_t *collect_buffers(struct buffer *buf) {
 			buf = buf->next;
 		}
 	}
-    return res;
+	return res;
 }
 
 static void clear_http_request(http_request_t *c)
 {
-    if (c->path) {
+	if (c->path) {
 		free(c->path);
 		c->path = NULL;
-    }
-    if (c->body) {
+	}
+	if (c->body) {
 		free(c->body);
 		c->body = NULL;
-    }
-    if (c->content_type) {
+	}
+	if (c->content_type) {
 		free(c->content_type);
 		c->content_type = NULL;
-    }
+	}
 	if (c->ws_key) {
 		free(c->ws_key);
 		c->ws_key = NULL;
@@ -148,54 +157,51 @@ static void free_http_connection(http_connection_t *c)
 		free(c->request);
 		c->request = NULL;
 	}
-    if (c->headers) {
+	if (c->headers) {
 		free_buffer(c->headers);
 		c->headers = NULL;
-    }
-    if (c->s != INVALID_SOCKET) {
+	}
+	if (c->s != INVALID_SOCKET) {
 		closesocket(c->s);
 		c->s = INVALID_SOCKET;
-    }
+	}
 	free(c);
 }
 
-
 static int send_response(http_connection_t *c, const char *buf, unsigned int len)
 {
-    unsigned int i = 0;
-    /* we have to tell R to ignore SIGPIPE otherwise it can raise an error
-       and get us into deep trouble */
-    while (i < len) {
+	unsigned int i = 0;
+	/* we have to tell R to ignore SIGPIPE otherwise it can raise an error
+	   and get us into deep trouble */
+	while (i < len) {
 		int n = c->send((socket_connection_t*) c, buf + i, len - i);
-		if (n < 1) {
+		if (n < 1)
 			return -1;
-		}
 		i += n;
-    }
-    return 0;
+	}
+	return 0;
 }
 
 /* sends HTTP/x.x plus the text (which should be of the form " XXX ...") */
 static int send_http_response(http_connection_t *c, const char *text) {
-    char buf[96];
-    const char *s = HTTP_SIG(c->request);
-    int l = strlen(text), res;
-    /* reduce the number of packets by sending the payload en-block from buf */
-    if (l < sizeof(buf) - 10) {
+	char buf[96];
+	const char *s = HTTP_SIG(c->request);
+	int l = strlen(text), res;
+	/* reduce the number of packets by sending the payload en-block from buf */
+	if (l < sizeof(buf) - 10) {
 		strcpy(buf, s);
 		strcpy(buf + 8, text);
 		return send_response(c, buf, l + 8);
-    }
-    res = c->send((socket_connection_t*) c, s, 8);
-    if (res < 8) return -1;
-    return send_response(c, text, strlen(text));
+	}
+	res = c->send((socket_connection_t*) c, s, 8);
+	if (res < 8) return -1;
+	return send_response(c, text, strlen(text));
 }
 
 /* decode URI in place (decoding never expands) */
-void uri_decode(char *s)
-{
-    char *t = s;
-    while (*s) {
+void uri_decode(char *s) {
+	char *t = s;
+	while (*s) {
 		if (*s == '+') { /* + -> SPC */
 			*(t++) = ' '; s++;
 		} else if (*s == '%') {
@@ -211,14 +217,14 @@ void uri_decode(char *s)
 			if (*s) s++;
 			*(t++) = (char) ec;
 		} else *(t++) = *(s++);
-    }
-    *t = 0;
+	}
+	*t = 0;
 }
 
 /* finalize a request - essentially for HTTP/1.0 it means that
  * we have to close the connection */
 static void fin_request(http_request_t *c) {
-    if (!IS_HTTP_1_1(c))
+	if (!IS_HTTP_1_1(c))
 		c->attr |= CONNECTION_CLOSE;
 }
 
@@ -239,15 +245,15 @@ static void process_request(http_connection_t *c) {
 /* this function is called to fetch new data from the client
  * connection socket and process it */
 static void http_input_iteration(http_connection_t *c) {
-    int n;
+	int n;
 	http_request_t *req;
 
-    DBG(printf("worker_input_handler, data=%p\n", (void*) c));
-    if (!c || !c->request) return;
+	DBG(printf("worker_input_handler, data=%p\n", (void*) c));
+	if (!c || !c->request) return;
 	req = c->request;
 
-    DBG(printf("input handler for worker %p (sock=%d, part=%d, method=%d, line_pos=%d)\n", (void*) c, (int)c->s, (int)c->part, (int)req->method, (int)c->line_pos));
-	
+	DBG(printf("input handler for worker %p (sock=%d, part=%d, method=%d, line_pos=%d)\n", (void*) c, (int)c->s, (int)c->part, (int)req->method, (int)c->line_pos));
+
     /* FIXME: there is one edge case that is not caught on unix: if
      * recv reads two or more full requests into the line buffer then
      * this function exits after the first one, but input handlers may
@@ -258,7 +264,7 @@ static void http_input_iteration(http_connection_t *c) {
      * happen, because clients should wait for the response and even
      * if they don't it's unlikely that both requests get combined
      * into one packet. */
-    if (c->part < PART_BODY) {
+	if (c->part < PART_BODY) {
 		char *s = c->line_buf;
 		n = c->recv((socket_connection_t*) c, c->line_buf + c->line_pos, LINE_BUF_SIZE - c->line_pos - 1);
 		DBG(printf("[recv n=%d, line_pos=%d, part=%d]\n", n, c->line_pos, (int)c->part));
@@ -483,8 +489,8 @@ static void http_input_iteration(http_connection_t *c) {
 			c->line_pos = 0;
 			return;
 		}
-    }
-    if (c->part == PART_BODY && req->body) { /* BODY  - this branch always returns */
+	}
+	if (c->part == PART_BODY && req->body) { /* BODY  - this branch always returns */
 		if (c->body_pos < req->content_length) { /* need to receive more ? */
 			DBG(printf("BODY: body_pos=%d, content_length=%ld\n", c->body_pos, req->content_length));
 			n = c->recv((socket_connection_t*) c, req->body + c->body_pos, req->content_length - c->body_pos);
@@ -514,10 +520,10 @@ static void http_input_iteration(http_connection_t *c) {
 			c->part = PART_REQUEST;
 			return;
 		}
-    }
-	
-    /* we enter here only if recv was used to leave the headers with no body */
-    if (c->part == PART_BODY && !req->body) {
+	}
+
+	/* we enter here only if recv was used to leave the headers with no body */
+	if (c->part == PART_BODY && !req->body) {
 		char *s = c->line_buf;
 		if (c->line_pos > 0) {
 			if ((s[0] != '\r' || s[1] != '\n') && (s[0] != '\n')) {
@@ -562,7 +568,7 @@ static void http_input_iteration(http_connection_t *c) {
 			http_close(c);
 			return;
 		}
-    }
+	}
 }
 
 /* this defines which clinets are allowed, for now all */
@@ -616,26 +622,26 @@ int http_send(http_connection_t *c, const void *buf, size_t len) {
 			return (n < 0) ? -1 : 1;
 		len -= n;
 		buf += n;
-    }
-    return 0;
+	}
+	return 0;
 }
 
 void http_response(http_connection_t *conn, int code, const char *txt,
 				   const char *content_type, int content_length, const char *headers) {
 	http_request_t *req = conn->request;
-    char buf[512];
-    if (content_length < 0)
-	snprintf(buf, sizeof(buf), "HTTP/1.%c %d %s\r\nContent-type: %s\r\n%s%s\r\n",
-		 (req->attr & HTTP_1_0) ? '0' : '1', code, txt ? txt : "<NULL>",
-		 content_type ? content_type : "text/plain",
-		 headers ? headers : "", headers ? "\r\n" : "");
-    else
-	snprintf(buf, sizeof(buf), "HTTP/1.%c %d %s\r\nContent-type: %s\r\nContent-length: %d\r\n%s%s\r\n",
-		 (req->attr & HTTP_1_0) ? '0' : '1', code, txt ? txt : "<NULL>",
-		 content_type ? content_type : "text/plain",
-		 content_length,
-		 headers ? headers : "", headers ? "\r\n" : "");
-    http_send(conn, buf, strlen(buf));
+	char buf[512];
+	if (content_length < 0)
+		snprintf(buf, sizeof(buf), "HTTP/1.%c %d %s\r\nContent-type: %s\r\n%s%s\r\n",
+				 (req->attr & HTTP_1_0) ? '0' : '1', code, txt ? txt : "<NULL>",
+				 content_type ? content_type : "text/plain",
+				 headers ? headers : "", headers ? "\r\n" : "");
+	else
+		snprintf(buf, sizeof(buf), "HTTP/1.%c %d %s\r\nContent-type: %s\r\nContent-length: %d\r\n%s%s\r\n",
+				 (req->attr & HTTP_1_0) ? '0' : '1', code, txt ? txt : "<NULL>",
+				 content_type ? content_type : "text/plain",
+				 content_length,
+				 headers ? headers : "", headers ? "\r\n" : "");
+	http_send(conn, buf, strlen(buf));
 }
 
 
