@@ -23,7 +23,8 @@
   awaits a response and closes the connection.
 }
 \usage{
-os.start(host = NULL, port = 9012L, threads = 4L)
+os.start(host = NULL, port = 9012L, threads = 4L,
+         protocol = c("osrv", "http"))
 
 o.put(key, value, sfs = FALSE)
 o.get(key, sfs = FALSE, remove = FALSE)
@@ -38,6 +39,7 @@ os.ask(cmd, host = "127.0.0.1", port = 9012L, sfs = FALSE)
     bound.}
   \item{port}{integer, TCP port number to bind to}
   \item{threads}{integer, number of worker threads to start}
+  \item{protocol}{string, which protocol to use}
   \item{key}{string, key to use for retrieval}
   \item{value}{payload to serve. If \code{sfs=FALSE} then it must be a
     raw vector.}

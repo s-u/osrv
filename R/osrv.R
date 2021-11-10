@@ -1,5 +1,8 @@
-os.start <- function(host=NULL, port=9012L, threads=4L)
-    .Call(C_start, host, port, threads)
+os.start <- function(host=NULL, port=9012L, threads=4L, protocol=c("osrv","http"))
+    switch(match.arg(protocol),
+      osrv = .Call(C_start, host, port, threads),
+      http = .Call(C_start_http, host, port, threads)
+    )
 
 o.put <- function(key, value, sfs=FALSE)
     .Call(C_put, key, value, sfs)
