@@ -21,10 +21,10 @@ SEXP C_start_http(SEXP sHost, SEXP sPort, SEXP sThreads);
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+/* for TCP_NODELAY */
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <arpa/inet.h>
 
 #include "therver.h"
 #include "obj.h"
@@ -48,15 +48,14 @@ typedef struct {
 } work_t;
 
 
-/* from fd_store.c */
-void fd_store(int s, SEXP sWhat);
-
 static void http_process(http_request_t *req, http_connection_t *conn) {
     if (!strncmp("/data/", req->path, 6)) {
-	/* FIXME: we're lazy and assume anything after /data/ is the key
-	   otherwise we'd need to copy the key string ... */
 	/* FIXME: should we put some limits on the keys? */
+	char *c = req->path + 6;
 	const char *key = req->path + 6;
+	/* end the key if we see / or ? */
+	while (*c && *c != '/' && *c != '?') c++;
+	*c = 0;
 	if (req->method == METHOD_HEAD || req->method == METHOD_GET) {
 	    obj_entry_t *o = obj_get(key, 0);
 	    if (req->method == METHOD_GET && o && !o->obj) {
