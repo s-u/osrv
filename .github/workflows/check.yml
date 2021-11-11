@@ -29,6 +29,7 @@ jobs:
 
       - uses: s-u/R-actions/pkg-check@master
         with:
+          debian-deps: libcurl4-openssl-dev
           check-flags: --as-cran
           
       - name: Show test output
