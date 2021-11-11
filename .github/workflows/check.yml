@@ -32,11 +32,11 @@ jobs:
           check-flags: --as-cran
           
       - name: Show test output
-        run: cat osrv.Rcheck/tests/test.Rout
+        run: cd $BLDIR && cat osrv.Rcheck/tests/test.Rout
 
       - name: Upload check results
         if: failure()
         uses: actions/upload-artifact@master
         with:
           name: ${{ runner.os }}-r${{ matrix.r }}-results
-          path: osrv.Rcheck
+          path: ${{ env.BLDIR }}/osrv.Rcheck
