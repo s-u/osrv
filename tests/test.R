@@ -194,6 +194,13 @@ assert("GET on local put", {
 
 assert("local get + remove", o.get("foo2", remove=TRUE), charToRaw("bar2"))
 
+assert("SFS put", o.put("foo", "hello!", TRUE))
+
+assert("GET SFS", {
+  r <- GET("http://127.0.0.1:8089/data/foo")
+  identical(status_code(r), 200L) &&
+  identical(restoreSFS(content(r)), "hello!") })
+
 } else {
   cat("WARNING: httr not found, cannot perfrom HTTP tests.\n\n")
 }
