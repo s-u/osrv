@@ -32,18 +32,9 @@ SEXP C_dep_req(SEXP sName, SEXP sKeys, SEXP sMsgID) {
     return Rf_ScalarInteger(res);
 }
 
-SEXP C_comp_pop(SEXP sWait) {
-    double tout = Rf_asReal(sWait);
-    dep_init();
-    {
-	ev_queue_t *q = deps_queue();
-	ev_entry_t *e = (tout > 0) ? ev_pop_wait(q, tout) : ev_pop(q);
-	if (e) {
-	    SEXP res = Rf_allocVector(RAWSXP, e->len);
-	    memcpy(RAW(res), e->data, XLENGTH(res));
-	    ev_free(e);
-	    return res;
-	}
-    }
-    return R_NilValue;
+/* revq.c */
+SEXP evq2R(ev_queue_t *q);
+
+SEXP C_dep_queue() {
+    return evq2R(deps_queue());
 }
