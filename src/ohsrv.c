@@ -29,6 +29,8 @@ SEXP C_start_http(SEXP sHost, SEXP sPort, SEXP sThreads);
 #include "therver.h"
 #include "obj.h"
 #include "http.h"
+#include "evqueue.h"
+#include "deps.h"
 
 #include <Rinternals.h>
 
@@ -41,15 +43,11 @@ SEXP C_start_http(SEXP sHost, SEXP sPort, SEXP sThreads);
 #define MAX_OBUF 2048
 #define MAX_SEND (1024*1024) /* 1Mb */
 
-typedef struct {
-    int  bol, n;
-    char buf[MAX_BUF];
-    char obuf[MAX_OBUF];
-} work_t;
-
-
 /* hcstore.c */
 int http_store(http_connection_t *conn, SEXP sWhat);
+
+/* FIXME: we register only one queue for the /work API */
+static ev_queue_t *queue;
 
 static void http_process(http_request_t *req, http_connection_t *conn) {
     if (!strncmp("/data/", req->path, 6)) {
@@ -97,6 +95,35 @@ static void http_process(http_request_t *req, http_connection_t *conn) {
 	    return;
 	}
     }
+    if (!strncmp("/work/", req->path, 6)) {
+	ev_entry_t *e;
+	/* FIXME: we don't use the path, but we should perhaps create
+	   the payload for the queue that contains the path ... ? */
+	if (req->method != METHOD_POST) {
+	    http_response(conn, 405, "Method Not Allowed", 0, 0, 0);
+	    return;
+	}
+	if (!queue) {
+	    http_response(conn, 404, "No Queue", 0, 0 ,0);
+	    return;
+	}
+	if (!req->body || req->content_length < 1) {
+	    http_response(conn, 403, "Invalid payload", 0, 0, 0);
+	    return;
+	}
+	e = ev_create(req->body, req->content_length, ev_free_data);
+	if (e) {
+	    /* queue took ownership */
+	    req->body = 0;
+	    if (ev_push(queue, e, 0)) {
+		http_response(conn, 200, "OK", 0, 0, 0);
+		return;
+	    }
+	    ev_free(e);
+	}
+	http_response(conn, 501, "Queue Push Failed", 0, 0, 0);
+	return;
+    }
     http_response(conn, 404, "Invalid API Path", 0, 0, 0);
 }
 
@@ -126,6 +153,8 @@ SEXP C_start_http(SEXP sHost, SEXP sPort, SEXP sThreads) {
 	Rf_error("Invalid number of threads %d", threads);
 
     obj_init();
+    /* FIXME: this is a hack, we use the deps queue */
+    if (!queue) queue = deps_queue();
     if (!therver(host, port, threads, do_process))
 	return ScalarLogical(0);
 
