@@ -71,17 +71,26 @@ int http_connected(SOCKET s, int flags, http_process_callback process);
    lines terminated with exactly one \r\n each. If content_type is not
    set, it defaults to "text/plain". content_length can be -1 if no
    Content-Length header is desired.
-*/
-void http_response(http_connection_t *conn, int code, const char *txt,
+   Return value: 0 = ok, 1 = connection closed, -1 = error */
+int http_response(http_connection_t *conn, int code, const char *txt,
                    const char *content_type, int content_length, const char *headers);
 
 /* The process callback must either leave the connection in fulfilled
    state so next requests are allowed, or it must call http_abort
    to close the connection */
 
-/* 0 = ok, 1 = connection closed, -1 = error */
-int http_send(http_connection_t *c, const void *buf, size_t len);
-void http_abort(http_connection_t *c);
+/* Send following bytes directly. A response body is expected to be sent
+   this way. Return value same as http_response */
+int  http_send(http_connection_t *conn, const void *buf, size_t len);
+
+/* send one chunk in Transfer-Encoding: chunked stream.
+   Note that last chunk must be of length 0 and finalizes the stream
+   (buf is ignored in that case). If you need trailer headers,
+   use the corresponding direct call to http_send instead.
+   Return value is same as http_send */
+int http_send_chunk(http_connection_t *conn, const void *buf, size_t len);
+
+void http_abort(http_connection_t *conn);
 
 #endif
 

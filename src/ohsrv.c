@@ -48,6 +48,9 @@ typedef struct {
 } work_t;
 
 
+/* hcstore.c */
+int http_store(http_connection_t *conn, SEXP sWhat);
+
 static void http_process(http_request_t *req, http_connection_t *conn) {
     if (!strncmp("/data/", req->path, 6)) {
 	/* FIXME: should we put some limits on the keys? */
@@ -58,11 +61,12 @@ static void http_process(http_request_t *req, http_connection_t *conn) {
 	*c = 0;
 	if (req->method == METHOD_HEAD || req->method == METHOD_GET) {
 	    obj_entry_t *o = obj_get(key, 0);
-	    if (req->method == METHOD_GET && o && !o->obj) {
-		/* FIXME: this would require chunked transfer, or
-		   pre-allocating, so more work ...*/
-		http_response(conn, 501, "Object requires streaming serialization which is not implemented",
-			      0, 0, 0);
+	    /* FIXME: we have two choices: use chunked encoding to stream or
+	       use mem_store and cache. For now we assume that the usage is for
+	       large data so we stream, but that is an arbitrary decision. */
+	    if (req->method == METHOD_GET && o && !o->obj && o->sWhat) {
+		http_response(conn, 200, "OK", "application/octet-stream", -1, "Transfer-Encoding: chunked\r\n");
+		http_store(conn, o->sWhat);
 		return;
 	    }
 	    if (!o) {
@@ -70,7 +74,7 @@ static void http_process(http_request_t *req, http_connection_t *conn) {
 		return;
 	    }
 	    http_response(conn, 200, "OK", "application/octet-stream",
-			  o->len, 0);
+			  o->obj ? o->len : -1, 0);
 	    if (req->method == METHOD_GET)
 		http_send(conn, o->obj, o->len);
 	    return;

@@ -626,22 +626,60 @@ int http_send(http_connection_t *c, const void *buf, size_t len) {
 	return 0;
 }
 
-void http_response(http_connection_t *conn, int code, const char *txt,
+static const char hex[16] = "0123456789abcdef";
+
+int http_send_chunk(http_connection_t *conn, const void *buf, size_t len) {
+	char sz[20], *sc;
+	int r;
+	if (len > 0) {
+		int szl = 0;
+		size_t l = len;
+		/* compute the number of bytes needed for the length */
+		while (l > 0) {
+			szl++;
+			l >>= 4;
+		}
+		sc = sz + (szl - 1);
+		l = len;
+		while (l > 0) {
+			*(sc--) = hex[l & 15];
+			l >>= 4;
+		}
+		sc = sz + szl;
+	} else {
+		/* NOTE: we do send the final \r\n so the response is complete,
+		   we do not support (optional) trailer headers. */
+		strcpy(sz, "0\r\n\r\n");
+		return http_send(conn, sz, 5);
+	}
+	*(sc++) = '\r';
+	*(sc++) = '\n';
+	/* <size>\r\n */
+	if ((r = http_send(conn, sz, sc - sz)))
+		return r;
+	/* chunk */
+	if ((r = http_send(conn, buf, len)))
+		return r;
+	/* \r\n */
+	return http_send(conn, sc - 2, 2);
+}
+
+int  http_response(http_connection_t *conn, int code, const char *txt,
 				   const char *content_type, int content_length, const char *headers) {
 	http_request_t *req = conn->request;
 	char buf[512];
 	if (content_length < 0)
-		snprintf(buf, sizeof(buf), "HTTP/1.%c %d %s\r\nContent-type: %s\r\n%s%s\r\n",
+		snprintf(buf, sizeof(buf), "HTTP/1.%c %d %s\r\nContent-type: %s\r\n%s\r\n",
 				 (req->attr & HTTP_1_0) ? '0' : '1', code, txt ? txt : "<NULL>",
 				 content_type ? content_type : "text/plain",
-				 headers ? headers : "", headers ? "\r\n" : "");
+				 headers ? headers : "");
 	else
-		snprintf(buf, sizeof(buf), "HTTP/1.%c %d %s\r\nContent-type: %s\r\nContent-length: %d\r\n%s%s\r\n",
+		snprintf(buf, sizeof(buf), "HTTP/1.%c %d %s\r\nContent-type: %s\r\nContent-length: %d\r\n%s\r\n",
 				 (req->attr & HTTP_1_0) ? '0' : '1', code, txt ? txt : "<NULL>",
 				 content_type ? content_type : "text/plain",
 				 content_length,
-				 headers ? headers : "", headers ? "\r\n" : "");
-	http_send(conn, buf, strlen(buf));
+				 headers ? headers : "");
+	return http_send(conn, buf, strlen(buf));
 }
 
 
