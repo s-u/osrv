@@ -6,7 +6,7 @@
    NOTES:
    - obj_init() MUST be called before any of the functions are used
 
-   - obj_get() can be called from any thread, but the result is onyl
+   - obj_get() can be called from any thread, but the result is only
      valid until obj_gc() call
 
    - obj_add() 
