@@ -47,7 +47,10 @@ ev_queue_t *deps_queue() {
 }
 
 /* is NOT allowed to call any object API
-   since it is called from critical region in obj */
+   since it is called from critical region in obj.
+   NOTE: currently, we allow key to be NULL which essentially
+   casues all depednencies to be checked for completion.
+*/
 void deps_complete(const char *key) {
     depent_t *e, *prev = 0;
     pthread_mutex_lock(&dep_mutex);
@@ -55,7 +58,7 @@ void deps_complete(const char *key) {
     while (e) {
 	int i = 0, n = e->nreq, sat = 0;
 	while (i < n) {
-	    if (!strcmp(key, e->keys[i]))
+	    if (key && !strcmp(key, e->keys[i]))
 		e->status[i] = 1;
 	    sat += e->status[i];
 	    i++;
@@ -110,11 +113,26 @@ int deps_add(const char *name, const char **keys, int n, int msg) {
     e->status = (char*) (e->name + nlen + 1 + ((sizeof(char*)) * (n + 1)));
 
     d = (char*) (e->name + nlen + 1 + ((sizeof(char*)) * (n + 1)) + (n + 1));
+
+    /* FIXME! We have a problem: we need to check
+       the initial existence of objects, but we can't do it under dep_mutex
+       lock, because obj will try to lock it in its critical region, so
+       if it did while we check, it would cause a deadlock.
+       We are between a rock and a hard place: if we do this check *before*
+       placing the dep entry then we are safe from memory management point
+       of view, because we own the structure. But if an object will get added
+       while we check, it won't signal and the dependency can get stuck.
+       On the other hand if we try to do this check *after* adding the entry,
+       then we guarantee that nothing will get lost, but if the dependency
+       got statisfied in the meantime the structure will be already released.
+       For now we go with Plan A, because Plan B could result in a segfault.
+    */
     i = 0;
     while (i < n) {
 	int l = strlen(keys[i]);
 	memcpy(d, keys[i], l);
 	e->keys[i] = d;
+	e->status[i] = obj_get(d, 0) ? 1 : 0;
 	d += l + 1;
 	i++;
     }
@@ -128,6 +146,8 @@ int deps_add(const char *name, const char **keys, int n, int msg) {
     }
     pthread_mutex_unlock(&dep_mutex);
 
+    /* safety: verify all completions */
+    deps_complete(0);
+
     return 0;
 }
-
